@@ -39,6 +39,14 @@ def bigrams(sentences):
             bigram_counts[bigram] += 1
     return dict(bigram_counts)
 
+def unigrams(sentences):
+    unigram_counts = collections.defaultdict(int)
+    for sentence in sentences:
+        for word in sentence:
+            if word in ['<s>', '<\\s>']:
+                continue
+            unigram_counts[word] += 1
+    return dict(unigram_counts)
 
 #a and b
 hamlet_sentences = preprocessing('hamlet.txt')
@@ -126,75 +134,81 @@ compare_bigrams(hamlet_bigrams, macbeth_bigrams)
 
 import random
 
-def generate_sentence(bigram_model, max_length=10, start_token='<s>', end_token='<\\s>'):
-    sentence = [start_token]
-    current_token = start_token
-    while len(sentence) < max_length and current_token != end_token:
-        # get the possible next tokens for the current token
-        next_tokens = [next_token for (token, next_token) in bigram_model.keys() if token == current_token]
-        # select a random next token from the possible tokens
-        next_token = random.choice(next_tokens)
-        sentence.append(next_token)
-        current_token = next_token
-    sentence.append(end_token)
-    return sentence
+def generate_random_sentence_unsmoothed_bigram(unigrams, bigrams, max_length=20):
+    sentence = ['<s>']
+    while len(sentence) < max_length and sentence[-1] != '<\\s>':
+        previous_word = sentence[-1]
+        if previous_word in bigrams:
+            next_word = random.choice(list(bigrams[previous_word].keys()))
+            sentence.append(next_word)
+        else:
+            next_word = random.choice(list(unigrams.keys()))
+            sentence.append(next_word)
+    return ' '.join(sentence)
 
-random.seed(17)
-random_sentence = generate_sentence(hamlet_bigrams)
-print(random_sentence)
-
-
-
-
-def compute_unigrams(text, smoothing=False, delta=1):
-    # split the text into words
-    words = text.split()
-    # use collections.Counter to compute the frequency of each word
-    unigram_counts = collections.Counter(words)
-    if smoothing:
-        # add delta to the frequency of each word
-        for word in set(words):
-            unigram_counts[word] += delta
-    # normalize the frequencies to obtain probabilities
-    total = sum(unigram_counts.values())
-    unigram_probs = {word: count/total for word, count in unigram_counts.items()}
-    return unigram_probs
-
-def compute_bigrams(text, smoothing=False, delta=1):
-    # split the text into words
-    words = text.split()
-    # use collections.defaultdict to store the frequency of each bigram
-    bigram_counts = collections.defaultdict(int)
-    # loop through the words and compute the frequency of each bigram
-    for i in range(len(words) - 1):
-        bigram = (words[i], words[i+1])
-        bigram_counts[bigram] += 1
-    if smoothing:
-        # add delta to the frequency of each bigram
-        for bigram in bigram_counts.keys():
-            bigram_counts[bigram] += delta
-    # normalize the frequencies to obtain probabilities
-    bigram_probs = {}
-    for bigram, count in bigram_counts.items():
-        unigram_count = sum(bigram_counts[bigram[i:i+1]] for i in range(2))
-        bigram_probs[bigram] = count / unigram_count
-    return bigram_probs
-
-def generate_random_sentence(bigram_probs, start_token="<s>", end_token="</s>", max_length=10):
-    sentence = [start_token]
-    current_word = start_token
-    while current_word != end_token and len(sentence) < max_length:
-        next_word = random.choices(list(bigram_probs[current_word].keys()), weights=list(bigram_probs[current_word].values()))[0]
-        sentence.append(next_word)
-        current_word = next_word
-    return sentence
-
-def compute_perplexity(sentence, bigram_probs):
-    prob = 1
-    for i in range(len(sentence) - 1):
-        bigram = (sentence[i], sentence[i+1])
-        prob *= bigram_probs.get(bigram, 0)
-    perplexity = pow(1/prob, 1/len(sentence))
+def compute_perplexity(sentence, unigrams, bigrams):
+    tokens = sentence.split()
+    perplexity = 1.0
+    for i in range(1, len(tokens)):
+        previous_word = tokens[i-1]
+        current_word = tokens[i]
+        bigram_count = bigrams[previous_word][current_word] if previous_word in bigrams and current_word in bigrams[previous_word] else 0
+        unigram_count = unigrams[current_word]
+        probability = (bigram_count + 1) / (unigram_count + len(unigrams))
+        perplexity *= 1/probability
+    perplexity = pow(perplexity, 1/len(tokens))
     return perplexity
+
+
+import random
+
+hamlet_unigrams = unigrams(hamlet_sentences)
+random.seed(17)
+sentence = generate_random_sentence_unsmoothed_bigram(hamlet_unigrams, hamlet_bigrams, 10)
+print(sentence)
+
+
+perplexity = compute_perplexity(sentence, hamlet_unigrams, hamlet_bigrams)
+print(perplexity)
+
+
+#problem 4
+
+def unigram(tokens, smooth=True):
+    if smooth:
+        counts = collections.defaultdict(lambda: 1)
+        for token in tokens:
+            counts[token] += 1
+    else:
+        counts = collections.defaultdict(int)
+        for token in tokens:
+            counts[token] += 1
+    total = sum(counts.values())
+    probs = {token: count/total for token, count in counts.items()}
+    return probs
+
+
+def bigram(tokens, smooth=True):
+    if smooth:
+        counts = collections.defaultdict(lambda: collections.defaultdict(lambda: 1))
+    else:
+        counts = collections.defaultdict(lambda: collections.defaultdict(int))
+    for i in range(len(tokens) - 1):
+        token1 = tokens[i]
+        token2 = tokens[i+1]
+        counts[token1][token2] += 1
+    probs = {}
+    for token1, next_tokens in counts.items():
+        total = sum(next_tokens.values())
+        probs[token1] = {token2: count/total for token2, count in next_tokens.items()}
+    return probs
+
+
+
+bigram_probs = bigram(hamlet_bigrams, smooth=True)
+prob_hd = bigram_probs['hath'].get('discretion', 0)
+print(f"The smoothed bigram probability of 'hath' and 'discretion' in the hamlet corpus is {prob_hd:.4f}")
+
+
 
 
